@@ -1,7 +1,18 @@
 import streamlit as st
 import time
-from generate_text import generate_llm_like_response
+from inference_pipeline import run_inference
+from sentence_transformers import SentenceTransformer, util
+import re
 
+# Initialize session state variables
+if "current_topic" not in st.session_state:
+    st.session_state.current_topic = None
+if "last_user_prompt" not in st.session_state:
+    st.session_state.last_user_prompt = None
+if "topic_model" not in st.session_state:
+    st.session_state.topic_model = SentenceTransformer('all-MiniLM-L6-v2')
+
+print("DEBUG: app.py loaded")
 st.set_page_config(page_title="Multi-Conversation Chatbot", layout="wide")
 
 st.title("🤖 Multi-Conversation Chatbot")
@@ -53,17 +64,48 @@ prompt = st.chat_input("What is your question?")
 
 if prompt:
     # Add user message
+    print("DEBUG: User prompt is", prompt)
     messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Generate simulated response
+    # Generate response using inference_pipeline
     with st.chat_message("assistant"):
+        print("DEBUG: Assistant block entered")
+
         with st.spinner("Thinking..."):
-            time.sleep(1.5)
-            response = generate_llm_like_response(min_words=10, max_words=80)
+            # Call your backend inference function
+            result = run_inference(prompt)
+            response = f"**Emotion:** {result['emotion']}\n\n**Strategy:** {result['strategy']}\n\n**Answer:** {result['answer']}"
             st.markdown(response)
     messages.append({"role": "assistant", "content": response})
 
 # Save back messages to state (actually it's mutable so not strictly necessary)
 st.session_state.conversations[st.session_state.current_conv] = messages
+
+shorten_response = None
+if messages and messages[-1]["role"] == "assistant":
+    last_answer = messages[-1]["content"]
+    if st.button("Shorten"):
+        try:
+            print("DEBUG: Shorten button clicked")
+            topic = st.session_state.current_topic or "the previous topic"
+            clean_answer = re.sub(r'\*\*.*?\*\*', '', last_answer)
+            prompt = (
+                f"Topic: {topic}\n\n"
+                f"Answer: {clean_answer}\n\n"
+                "Summarize the above answer in 3-4 sentences using the CAG strategy. Be concise and do not repeat details. Only output the summary."
+            )
+            result = run_inference(prompt)
+            summary = result['answer']
+            st.markdown(
+                f'''
+                <div style="background-color: #fff; padding: 1em; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 1em;">
+                    {summary}
+                </div>
+                ''',
+                unsafe_allow_html=True
+            )
+        except Exception as e:
+            print("ERROR in shorten button:", e)
+            st.error(f"Error: {e}")

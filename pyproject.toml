@@ -1,0 +1,39 @@
+[project]
+name = "ais-1-action-learning"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "D3ltaD4ve",email = "david.rossig12@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.11,<4.0"
+dependencies = [
+    "transformers (==4.53.2)",
+    "langchain (==0.3.25)",
+    "langchain-huggingface (==0.3.0)",
+    "huggingface-hub (==0.33.4)",
+    "langchain-google-community (==2.0.7)",
+    "sentence-transformers (==4.1.0)",
+    "pandas (==2.2.2)",
+    "numpy (==2.0.2)",
+    "scikit-learn (==1.6.1)",
+    "matplotlib (==3.10.0)",
+    "ipykernel (>=6.29.5,<7.0.0)",
+    "bitsandbytes (==0.46.1)",
+    "accelerate (==1.9.0)",
+    "torch (==2.7.1)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[[tool.poetry.source]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+priority = "explicit"
+
+
+[tool.poetry.dependencies]
+torch = {source = "pytorch-cu126"}
