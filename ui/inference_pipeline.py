@@ -82,11 +82,7 @@ def run_inference(user_prompt):
         "text-generation",
         model=mistral_model,
         tokenizer=mistral_tokenizer,
-<<<<<<< HEAD
-        max_new_tokens=256,
-=======
         max_new_tokens=1000,
->>>>>>> UI_v1
         return_full_text=False
     )
 
