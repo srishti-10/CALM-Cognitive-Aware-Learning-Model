@@ -3,7 +3,6 @@ from typing import Optional, List, Dict, Any
 
 API_BASE_URL = "http://localhost:8000"
 
-
 async def create_session_conversation(
     session_id: Optional[int] = None,
     last_updated: Optional[str] = None,   # ISO datetime string
@@ -63,3 +62,39 @@ async def get_user_by_username(username: str) -> List[Dict[str, Any]]:
         response = await client.get(f"{API_BASE_URL}/session_conversations/", params=params)
         response.raise_for_status()
         return response.json()  # List of user-conversation dicts matching username
+    
+async def load_user_conversations(user_id: str):
+    all_sessions = await get_session_conversations(user_id=user_id)  # Filter on user_id backend side
+
+    conversations = {}
+    sessionid_to_id = {}
+    for session in all_sessions:
+        sid = session.get('session_id')
+        db_id = session.get('id')
+        if sid is None:  # Skip rows with no session id
+            continue
+        sid_str = str(sid)
+        conversations[sid_str] = session.get('messages', [])
+        sessionid_to_id[sid_str] = db_id
+    return conversations, sessionid_to_id
+
+async def get_next_session_id(user_id: str) -> int:
+    sessions = await get_session_conversations(user_id=user_id)
+    session_ids = [s.get("session_id") for s in sessions if s.get("session_id") is not None]
+    if session_ids:
+        max_id = max(session_ids)
+        return max_id + 1
+    else:
+        return 1  # start from 1 if no sessions exist
+
+async def get_last_user_and_assistant(messages):
+    last_user = None
+    last_assistant = None
+    for msg in reversed(messages[:-1]):  # Exclude the current user prompt
+        if last_assistant is None and msg["role"] == "assistant":
+            last_assistant = msg["content"]
+        elif last_user is None and msg["role"] == "user":
+            last_user = msg["content"]
+        if last_user and last_assistant:
+            break
+    return last_user, last_assistant
