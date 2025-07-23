@@ -3,6 +3,11 @@ import time
 from inference_pipeline import run_inference
 from sentence_transformers import SentenceTransformer, util
 import re
+from export_pdf import export_conversation_to_pdf
+from topic_cag_logic import count_consecutive_same_topic
+from auth import register_user, authenticate_user, verify_totp, get_user_id
+import qrcode
+from io import BytesIO
 
 # Initialize session state variables
 if "current_topic" not in st.session_state:
@@ -15,7 +20,124 @@ if "topic_model" not in st.session_state:
 print("DEBUG: app.py loaded")
 st.set_page_config(page_title="Multi-Conversation Chatbot", layout="wide")
 
-st.title("🤖 Multi-Conversation Chatbot")
+# Remove phantom container and header at the very top, and make main block transparent
+st.markdown("""
+    <style>
+    .block-container {
+        padding-top: 0rem !important;
+        margin-top: 0rem !important;
+        background: transparent !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+    }
+    header[data-testid="stHeader"] {
+        height: 0rem;
+        min-height: 0rem;
+        visibility: hidden;
+        display: none;
+        box-shadow: none;
+    }
+    footer {visibility: hidden;}
+    #MainMenu {visibility: hidden;}
+    </style>
+""", unsafe_allow_html=True)
+
+# --- Authentication UI ---
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+if 'username' not in st.session_state:
+    st.session_state.username = None
+if 'user_id' not in st.session_state:
+    st.session_state.user_id = None
+if 'pending_2fa' not in st.session_state:
+    st.session_state.pending_2fa = False
+if 'pending_username' not in st.session_state:
+    st.session_state.pending_username = None
+
+if not st.session_state.authenticated:
+    st.markdown("""
+        <style>
+        .block-container {
+            max-width: 60%;
+            margin: 2rem auto !important;
+            padding-top: 4rem !important;
+            background: #fff !important;
+            border-radius: 16px !important;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.08) !important;
+        }
+        .login-title {
+            text-align: center;
+            font-size: 2.2rem;
+            font-weight: 700;
+            margin-bottom: 1.2rem;
+        }
+        .login-subtext {
+            text-align: center;
+            color: #888;
+            margin-bottom: 1.2rem;
+        }
+        .stButton>button {
+            width: 100%;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            padding: 0.6rem 0;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    st.markdown('<div class="login-title">🔐 Login or Register</div>', unsafe_allow_html=True)
+    st.markdown('<div class="login-subtext">Welcome to <b>AL_Git Chatbot</b>. Please log in or create an account to continue.</div>', unsafe_allow_html=True)
+    auth_mode = st.radio('Choose mode', ['Login', 'Register'], horizontal=True)
+    username = st.text_input('👤 Username')
+    password = st.text_input('🔑 Password', type='password')
+    if auth_mode == 'Register':
+        if st.button('📝 Register', type='primary'):
+            success, result = register_user(username, password)
+            if success:
+                st.success(f"Registered! Your user ID: {result['user_id']}")
+                st.info(f"Set up your authenticator app with this secret: {result['totp_secret']}")
+                app_name = 'AL_Git'
+                totp_uri = f"otpauth://totp/{app_name}:{username}?secret={result['totp_secret']}&issuer={app_name}"
+                qr = qrcode.make(totp_uri)
+                buf = BytesIO()
+                qr.save(buf, format='PNG')
+                st.image(buf.getvalue(), caption='Scan this QR code with Google Authenticator')
+                st.markdown("""
+                **How to use Google Authenticator:**
+                1. Open the Google Authenticator app on your phone.
+                2. Tap the "+" button to add a new account.
+                3. Choose "Scan a QR code" and scan the QR code above.
+                4. If you can't scan, choose "Enter a setup key" and enter the secret above.
+                5. After setup, use the 6-digit code shown in the app to log in.
+                """)
+            else:
+                st.error(result)
+    else:
+        if st.button('🔓 Login', type='primary'):
+            success, user = authenticate_user(username, password)
+            if success:
+                st.session_state.pending_2fa = True
+                st.session_state.pending_username = username
+                st.info('Enter your 2FA code from your authenticator app.')
+            else:
+                st.error(user)
+    if st.session_state.pending_2fa:
+        code = st.text_input('🔢 2FA Code')
+        if st.button('✅ Verify 2FA', type='primary'):
+            if verify_totp(st.session_state.pending_username, code):
+                st.session_state.authenticated = True
+                st.session_state.username = st.session_state.pending_username
+                st.session_state.user_id = get_user_id(st.session_state.username)
+                st.session_state.pending_2fa = False
+                st.session_state.pending_username = None
+                st.success('Login successful!')
+                st.rerun()
+            else:
+                st.error('Invalid 2FA code.')
+    st.stop()
+
+# Move st.title to after authentication
+if st.session_state.authenticated:
+    st.title("🤖 Multi-Conversation Chatbot")
 
 # Initialize session state for conversations store and current selected conversation
 if "conversations" not in st.session_state:
@@ -37,6 +159,26 @@ def add_new_conversation():
     new_name = f"Conversation {i}"
     st.session_state.conversations[new_name] = []
     st.session_state.current_conv = new_name
+
+def is_new_topic(new_prompt, last_prompt, threshold=0.4):
+    if not last_prompt:
+        return True
+    emb1 = st.session_state.topic_model.encode([new_prompt])[0]
+    emb2 = st.session_state.topic_model.encode([last_prompt])[0]
+    similarity = util.cos_sim(emb1, emb2).item()
+    return similarity < threshold
+
+def get_last_user_and_assistant(messages):
+    last_user = None
+    last_assistant = None
+    for msg in reversed(messages[:-1]):  # Exclude the current user prompt
+        if last_assistant is None and msg["role"] == "assistant":
+            last_assistant = msg["content"]
+        elif last_user is None and msg["role"] == "user":
+            last_user = msg["content"]
+        if last_user and last_assistant:
+            break
+    return last_user, last_assistant
 
 # Sidebar for selecting conversations
 st.sidebar.header("Conversations")
@@ -74,11 +216,32 @@ if prompt:
         print("DEBUG: Assistant block entered")
 
         with st.spinner("Thinking..."):
+            # Check for repeated topic
+            same_topic_count = count_consecutive_same_topic(messages, st.session_state.topic_model, threshold=0.4)
+            force_cag = same_topic_count >= 3
             # Call your backend inference function
-            result = run_inference(prompt)
-            response = f"**Emotion:** {result['emotion']}\n\n**Strategy:** {result['strategy']}\n\n**Answer:** {result['answer']}"
+            if is_new_topic(prompt, st.session_state.last_user_prompt, threshold=0.1):
+                st.session_state.current_topic = prompt
+                result = run_inference(prompt)
+            else:
+                last_user, last_assistant = get_last_user_and_assistant(messages)
+                if last_user and last_assistant:
+                    continuation_prompt = (
+                        f"User: {last_user}\n"
+                        f"Assistant: {last_assistant}\n"
+                        f"User: {prompt}\n"
+                        "Assistant:"
+                    )
+                    result = run_inference(continuation_prompt)
+                else:
+                    result = run_inference(prompt)
+            # Override strategy if needed
+            display_strategy = "CAG" if force_cag else result['strategy']
+            response = f"**Emotion:** {result['emotion']}\n\n**Strategy:** {display_strategy}\n\n**Answer:** {result['answer']}"
+            print("LENGTH OF RESPONSE:", len(response))
             st.markdown(response)
     messages.append({"role": "assistant", "content": response})
+    st.session_state.last_user_prompt = prompt
 
 # Save back messages to state (actually it's mutable so not strictly necessary)
 st.session_state.conversations[st.session_state.current_conv] = messages
@@ -98,14 +261,17 @@ if messages and messages[-1]["role"] == "assistant":
             )
             result = run_inference(prompt)
             summary = result['answer']
-            st.markdown(
-                f'''
-                <div style="background-color: #fff; padding: 1em; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 1em;">
-                    {summary}
-                </div>
-                ''',
-                unsafe_allow_html=True
-            )
+            st.markdown(summary)
+            messages.append({"role": "assistant", "content": summary})
         except Exception as e:
             print("ERROR in shorten button:", e)
             st.error(f"Error: {e}")
+
+# Place the Export Conversation as PDF button on the right
+col1, col2, col3 = st.columns([1, 1, 1])
+with col3:
+    if st.button("Export Conversation as PDF"):
+        conversation = st.session_state.conversations[st.session_state.current_conv]
+        export_conversation_to_pdf(conversation, "conversation_export.pdf")
+        with open("conversation_export.pdf", "rb") as f:
+            st.download_button("Download PDF", f, file_name="conversation_export.pdf")
