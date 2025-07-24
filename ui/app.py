@@ -17,8 +17,9 @@ st.set_page_config(page_title="Multi-Conversation Chatbot", layout="wide")
 
 
 # Remove phantom container and header at the very top, and make main block transparent
-"""
+
 st.markdown(
+    """
     <style>
     .block-container {
         padding-top: 0rem !important;
@@ -37,8 +38,9 @@ st.markdown(
     footer {visibility: hidden;}
     #MainMenu {visibility: hidden;}
     </style>
+    """
 , unsafe_allow_html=True)
-"""
+
 
 # --- UI States ---
 if "current_topic" not in st.session_state:
@@ -53,6 +55,8 @@ if "is_feedback_postive" not in st.session_state:
     st.session_state.is_feedback_postive = None # To track if feedback positive or negative
 if "is_ai_thinking" not in st.session_state:
     st.session_state.is_ai_thinking = False
+if 'last_conv_for_last_user_prompt' not in st.session_state:
+    st.session_state.last_conv_for_last_user_prompt = None
 
 # --- Authentication UI ---
 if 'authenticated' not in st.session_state:
@@ -70,6 +74,10 @@ if 'sessionid_to_id' not in st.session_state:
 if "conversations" not in st.session_state:
     st.session_state.conversations = {}
 
+def reset_all_states():
+    # Make a list of keys first to avoid "dictionary changed size during iteration" error
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
 
 if not st.session_state.authenticated:
     st.markdown("""
@@ -108,11 +116,28 @@ if not st.session_state.authenticated:
     password = st.text_input('🔑 Password', type='password')
     if auth_mode == 'Register':
         if st.button('📝 Register', type='primary'):
+            print("IN REGISTER MODE")
             success, result = register_user(username, password)
+            print("result: ", result)
             if success:
                 st.success(f"Registered! Your user ID: {result['user_id']}")
                 # Prepare payload data for new session conversation with empty messages
                 user_id = result['user_id']
+                st.info(f"Set up your authenticator app with this secret: {result['totp_secret']}")
+                app_name = 'AL_Git'
+                totp_uri = f"otpauth://totp/{app_name}:{username}?secret={result['totp_secret']}&issuer={app_name}"
+                qr = qrcode.make(totp_uri)
+                buf = BytesIO()
+                qr.save(buf, format='PNG')
+                st.image(buf.getvalue(), caption='Scan this QR code with Google Authenticator')
+                st.markdown("""
+                **How to use Google Authenticator:**
+                1. Open the Google Authenticator app on your phone.
+                2. Tap the "+" button to add a new account.
+                3. Choose "Scan a QR code" and scan the QR code above.
+                4. If you can't scan, choose "Enter a setup key" and enter the secret above.
+                5. After setup, use the 6-digit code shown in the app to log in.
+                """)
                 try:
                     initial_session_id = asyncio.run(get_next_session_id(user_id))
                 except Exception as e:
@@ -136,22 +161,6 @@ if not st.session_state.authenticated:
                     st.session_state.conversations[str(initial_session_id)] = []
                 except Exception as e:
                     st.error(f"Failed to create user session: {e}")
-
-                st.info(f"Set up your authenticator app with this secret: {result['totp_secret']}")
-                app_name = 'AL_Git'
-                totp_uri = f"otpauth://totp/{app_name}:{username}?secret={result['totp_secret']}&issuer={app_name}"
-                qr = qrcode.make(totp_uri)
-                buf = BytesIO()
-                qr.save(buf, format='PNG')
-                st.image(buf.getvalue(), caption='Scan this QR code with Google Authenticator')
-                st.markdown("""
-                **How to use Google Authenticator:**
-                1. Open the Google Authenticator app on your phone.
-                2. Tap the "+" button to add a new account.
-                3. Choose "Scan a QR code" and scan the QR code above.
-                4. If you can't scan, choose "Enter a setup key" and enter the secret above.
-                5. After setup, use the 6-digit code shown in the app to log in.
-                """)
             else:
                 st.error(result)
     else:
@@ -159,61 +168,60 @@ if not st.session_state.authenticated:
             #success, user = authenticate_user(username, password)
             #print("success: ", success, " user: ", user)
             #if success:
-                try:
-                    users = asyncio.run(get_user_by_username(username))
-                except Exception as e:
-                    st.error(f"Error fetching user info: {e}")
-                    users = []
-                if not users:
-                    st.error("User does not exist. Please register.")
-                else:
-                    # Check password locally (assuming same password for all user entries, or check first)
-                    user_record = users[0]
-                    print("user_record", user_record)
-                    if user_record.get("password") != password:
-                        st.error("Incorrect password.")
-                    else:
-                        # Password matched - proceed with 2FA flow
-                        st.session_state.pending_2fa = True
-                        st.session_state.pending_username = username
-                        st.info('Enter your 2FA code from your authenticator app.')
-    if st.session_state.pending_2fa:
-        code = st.text_input('🔢 2FA Code', key='two_factor_code')
-        if st.button('✅ Verify 2FA', key='verify_2fa_button'):
-            print("st.session_state.pending_username: ", st.session_state.pending_username)
-            print("code: ", code)
-            # if verify_totp(st.session_state.pending_username, code):
-            if 1 == 1:
-                st.session_state.authenticated = True
-                st.session_state.username = st.session_state.pending_username
+            success, user = authenticate_user(username, password)
+            try:
                 users = asyncio.run(get_user_by_username(username))
-                user_record = users[0]
-                st.session_state.user_id = user_record.get("user_id")
-                st.session_state.pending_2fa = False
-                st.session_state.pending_username = None
-                st.success('Login successful!')
-                st.session_state.conversations, st.session_state.sessionid_to_id = asyncio.run(load_user_conversations(st.session_state.user_id))
-                print("st.session_state.conversations: ", st.session_state.conversations)
-                st.rerun()  # better practice than st.rerun()
-                if not st.session_state.conversations:
-                    # If user has no conversation, create a blank one with session_id=1 or generated
-                    initial_session_id = 1
-                    empty_session = {
-                        "session_id": initial_session_id,
-                        "last_updated": datetime.now(timezone.utc).isoformat(),
-                        "messages": [],
-                        "username": st.session_state.username,
-                        "password": "",  # or omit
-                        "user_id": st.session_state.user_id
-                    }
-                    # Push empty session to backend
-                    # await create_session_conversation(**empty_session) - async handled appropriately
-                    st.session_state.conversations = {str(initial_session_id): []}
-                st.session_state.current_conv = list(st.session_state.conversations.keys())[0]
-                        # st.session_state.conversations = asyncio.run(load_user_conversations(user_id))
+            except Exception as e:
+                st.error(f"Error fetching user info: {e}")
+                users = []
+            if not users:
+                st.error("User does not exist. Please register.")
             else:
-                st.error('Invalid 2FA code.')
-
+                # Check password locally (assuming same password for all user entries, or check first)
+                user_record = users[0]
+                if user_record.get("password") != password:
+                    st.error("Incorrect password.")
+                else:
+                    # Password matched - proceed with 2FA flow
+                    st.session_state.pending_2fa = True
+                    st.session_state.pending_username = username
+                    st.info('Enter your 2FA code from your authenticator app.')
+        if st.session_state.pending_2fa:
+            code = st.text_input('🔢 2FA Code')
+            if st.button('✅ Verify 2FA', type='primary'):
+                print("st.session_state.pending_username: ", st.session_state.pending_username)
+                print("st.session_state.user_id: ", st.session_state.user_id)
+                print("code: ", code)
+                # if verify_totp(st.session_state.username, code):
+                if 1 == 1:
+                    st.session_state.authenticated = True
+                    st.session_state.username = st.session_state.pending_username
+                    users = asyncio.run(get_user_by_username(username))
+                    user_record = users[0]
+                    st.session_state.user_id = user_record.get("user_id")
+                    st.session_state.pending_2fa = False
+                    st.session_state.pending_username = None
+                    st.success('Login successful!')
+                    st.session_state.conversations, st.session_state.sessionid_to_id = asyncio.run(load_user_conversations(st.session_state.user_id))
+                    st.rerun()  # better practice than st.rerun()
+                    if not st.session_state.conversations:
+                        # If user has no conversation, create a blank one with session_id=1 or generated
+                        initial_session_id = 1
+                        empty_session = {
+                            "session_id": initial_session_id,
+                            "last_updated": datetime.now(timezone.utc).isoformat(),
+                            "messages": [],
+                            "username": st.session_state.username,
+                            "password": "",  # or omit
+                            "user_id": st.session_state.user_id
+                        }
+                        # Push empty session to backend
+                        # await create_session_conversation(**empty_session) - async handled appropriately
+                        st.session_state.conversations = {str(initial_session_id): []}
+                    st.session_state.current_conv = list(st.session_state.conversations.keys())[0]
+                            # st.session_state.conversations = asyncio.run(load_user_conversations(user_id))
+                else:
+                    st.error('Invalid 2FA code.')
     st.stop()
 
 # Move st.title to after authentication
@@ -307,29 +315,39 @@ if st.sidebar.button("Clear Current Conversation"):
     st.session_state.is_feedback_postive = None
     st.rerun()
 
+if st.sidebar.button("Log Out"):
+    reset_all_states()
+    st.rerun()
+
+if st.session_state.username:
+    # Use st.sidebar.markdown to place content in the sidebar
+    # You might want some styling to make it look like a proper footer
+    st.sidebar.markdown("---") # Optional: A separator line
+    st.sidebar.markdown(f"Logged in as: **{st.session_state.username}**")
+
 # Display the messages of the current conversation
 st.subheader(f"Chat - {st.session_state.current_conv}")
 
 messages = st.session_state.conversations.get(st.session_state.current_conv, [])
 
-for message in messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-
-    if st.session_state.last_user_prompt == None and messages:
-        # Find the last message where role is 'user'
+if st.session_state.current_conv != st.session_state.last_conv_for_last_user_prompt:
+    if messages:
         last_user_message_content = None
-        for i in range(len(messages) - 1, -1, -1): # Iterate backwards
-            message = messages[i]
-            # Use .get() for safety against KeyError, though 'role' should be standard now
-            # Also use .get() for 'content' to handle your mixed message formats gracefully
-            if message.get("role") == "user" or message.get("owner") == "user": # Check both possible keys
-                last_user_message_content = message.get("content") or message.get("message")
-                if last_user_message_content: # Ensure content is not None or empty
-                    break # Found the last user message, exit loop
+        for msg in reversed(messages):
+            if msg.get('role') == 'user' or msg.get('owner') == 'user':
+                last_user_message_content = msg.get('content') or msg.get('message')
+                if last_user_message_content:
+                    break
+        st.session_state.last_user_prompt = last_user_message_content
+    else:
+        # No messages, clear last_user_prompt
+        st.session_state.last_user_prompt = None
         
-        if last_user_message_content:
-            st.session_state.last_user_prompt = last_user_message_content
+    st.session_state.last_conv_for_last_user_prompt = st.session_state.current_conv
+
+for message in messages:
+    with st.chat_message(message.get("role", message.get("owner", "user"))):  # fallback role
+        st.markdown(message.get("content", message.get("message", "")))
 
 prompt = st.chat_input("What is your question?")
 
@@ -356,7 +374,7 @@ if prompt:
                 st.session_state.current_topic = prompt
                 result = run_inference(prompt)
             else:
-                last_user, last_assistant = get_last_user_and_assistant(messages)
+                last_user, last_assistant = asyncio.run(get_last_user_and_assistant(messages))
                 if last_user and last_assistant:
                     continuation_prompt = (
                         f"User: {last_user}\n"
@@ -458,7 +476,6 @@ if messages and messages[-1]["role"] == "assistant":
                     asyncio.run(update_session_conversation(conversation_id=db_id, update_fields=update_fields))
                 st.rerun()
             except Exception as e:
-                print("ERROR in shorten button (secondary):", e)
                 st.error(f"Error shortening: {e}")
 
 
@@ -495,7 +512,6 @@ if messages and messages[-1]["role"] == "assistant":
                     asyncio.run(update_session_conversation(conversation_id=db_id, update_fields=update_fields))
                 st.rerun()
             except Exception as e:
-                print("ERROR in lengthen button:", e)
                 st.error(f"Error lengthening: {e}")
 
         if st.button("Change Source", key="secondary_source"):
