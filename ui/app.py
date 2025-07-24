@@ -212,9 +212,6 @@ if not st.session_state.authenticated:
         if st.session_state.pending_2fa:
             code = st.text_input('🔢 2FA Code')
             if st.button('✅ Verify 2FA', type='primary'):
-                print("st.session_state.pending_username: ", st.session_state.pending_username)
-                print("st.session_state.user_id: ", st.session_state.user_id)
-                print("code: ", code)
                 if asyncio.run(verify_totp_code(st.session_state.pending_username, code)):
                 # if 1 == 1:
                     st.session_state.authenticated = True
@@ -439,7 +436,6 @@ if prompt:
             display_strategy = "CAG" if force_cag else result['strategy']
             encouragement = get_encouragement(result['emotion'])
             response = f"**Emotion:** {result['emotion']}\n\n**Strategy:** {display_strategy}\n\n**Answer:** {result['answer']}\n\n{encouragement}"
-            print("LENGTH OF RESPONSE:", len(response))
             st.markdown(response)
     messages.append({"role": "assistant", "content": response})
     st.session_state.last_user_prompt = prompt

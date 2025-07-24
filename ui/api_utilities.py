@@ -103,11 +103,8 @@ async def get_last_user_and_assistant(messages):
     return last_user, last_assistant
 
 async def verify_totp_code(username, code):
-    print("username: ", username)
     users = await get_user_by_username(username)
     user_with_totp = next((user for user in users if user.get('totp_secret') is not None), None)
-    print('user: ', user_with_totp)
-    print('ABOVE USER PRINT')
     if not user_with_totp or not user_with_totp.get('totp_secret'):
         return False
     totp = pyotp.TOTP(user_with_totp['totp_secret'])
