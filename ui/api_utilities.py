@@ -1,5 +1,6 @@
 import httpx
 from typing import Optional, List, Dict, Any
+import pyotp
 
 API_BASE_URL = "http://localhost:8000"
 
@@ -10,6 +11,7 @@ async def create_session_conversation(
     username: Optional[str] = None,
     password: Optional[str] = None,
     user_id: Optional[str] = None,
+    totp_secret: Optional[str] = None
 ) -> Dict[str, Any]:
     payload = {
         "session_id": session_id,
@@ -18,6 +20,7 @@ async def create_session_conversation(
         "username": username,
         "password": password,
         "user_id": user_id,
+        "totp_secret": totp_secret
     }
     payload = {k: v for k, v in payload.items() if v is not None}
     async with httpx.AsyncClient() as client:
@@ -98,3 +101,14 @@ async def get_last_user_and_assistant(messages):
         if last_user and last_assistant:
             break
     return last_user, last_assistant
+
+async def verify_totp_code(username, code):
+    print("username: ", username)
+    users = await get_user_by_username(username)
+    user_with_totp = next((user for user in users if user.get('totp_secret') is not None), None)
+    print('user: ', user_with_totp)
+    print('ABOVE USER PRINT')
+    if not user_with_totp or not user_with_totp.get('totp_secret'):
+        return False
+    totp = pyotp.TOTP(user_with_totp['totp_secret'])
+    return totp.verify(code)

@@ -8,7 +8,7 @@ from topic_cag_logic import count_consecutive_same_topic
 from auth import register_user, authenticate_user, verify_totp, get_user_id
 import qrcode
 from io import BytesIO
-from ui.api_utilities import create_session_conversation, get_session_conversations, get_session_conversation, update_session_conversation, delete_session_conversation, get_user_by_username, load_user_conversations, get_next_session_id, get_last_user_and_assistant
+from ui.api_utilities import create_session_conversation, get_session_conversations, get_session_conversation, update_session_conversation, delete_session_conversation, get_user_by_username, load_user_conversations, get_next_session_id, get_last_user_and_assistant, verify_totp_code
 import asyncio
 from datetime import datetime, timezone
 
@@ -118,12 +118,12 @@ if not st.session_state.authenticated:
         if st.button('📝 Register', type='primary'):
             print("IN REGISTER MODE")
             success, result = register_user(username, password)
-            print("result: ", result)
             if success:
                 st.success(f"Registered! Your user ID: {result['user_id']}")
                 # Prepare payload data for new session conversation with empty messages
                 user_id = result['user_id']
-                st.info(f"Set up your authenticator app with this secret: {result['totp_secret']}")
+                totp_secret = result['totp_secret']
+                # st.info(f"Set up your authenticator app with this secret: {result['totp_secret']}")
                 app_name = 'AL_Git'
                 totp_uri = f"otpauth://totp/{app_name}:{username}?secret={result['totp_secret']}&issuer={app_name}"
                 qr = qrcode.make(totp_uri)
@@ -151,6 +151,7 @@ if not st.session_state.authenticated:
                     username=username,
                     password=password,
                     user_id=user_id,
+                    totp_secret=totp_secret
                 )
                 try:
                     created_session = asyncio.run(payload_task)
@@ -168,7 +169,7 @@ if not st.session_state.authenticated:
             #success, user = authenticate_user(username, password)
             #print("success: ", success, " user: ", user)
             #if success:
-            success, user = authenticate_user(username, password)
+            #success, user = authenticate_user(username, password)
             try:
                 users = asyncio.run(get_user_by_username(username))
             except Exception as e:
@@ -192,8 +193,8 @@ if not st.session_state.authenticated:
                 print("st.session_state.pending_username: ", st.session_state.pending_username)
                 print("st.session_state.user_id: ", st.session_state.user_id)
                 print("code: ", code)
-                # if verify_totp(st.session_state.username, code):
-                if 1 == 1:
+                if asyncio.run(verify_totp_code(st.session_state.pending_username, code)):
+                # if 1 == 1:
                     st.session_state.authenticated = True
                     st.session_state.username = st.session_state.pending_username
                     users = asyncio.run(get_user_by_username(username))

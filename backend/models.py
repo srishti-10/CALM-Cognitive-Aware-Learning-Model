@@ -13,3 +13,4 @@ class SessionConversation(Base):
     username = Column(String, nullable=True)
     password = Column(String, nullable=True)  # Consider storing hashed passwords, not raw text
     user_id = Column(String(50), nullable=True, index=True)
+    totp_secret = Column(String(50), nullable=True, index=True)

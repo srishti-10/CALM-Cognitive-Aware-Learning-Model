@@ -9,6 +9,7 @@ class SessionConversationBase(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
     user_id: Optional[str] = None
+    totp_secret: Optional[str] = None
 
 class SessionConversationCreate(SessionConversationBase):
     pass  # All fields optional, or add required fields as needed
