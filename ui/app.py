@@ -11,10 +11,27 @@ from io import BytesIO
 from ui.api_utilities import create_session_conversation, get_session_conversations, get_session_conversation, update_session_conversation, delete_session_conversation, get_user_by_username, load_user_conversations, get_next_session_id, get_last_user_and_assistant, verify_totp_code
 import asyncio
 from datetime import datetime, timezone
+from unity_game_embed import show_unity_game
+from encouragement import get_encouragement
+from speech_utils import transcribe_audio, synthesize_speech
+import subprocess
+import os
 
 print("DEBUG: app.py loaded")
 st.set_page_config(page_title="Multi-Conversation Chatbot", layout="wide")
 
+# Hide the video placeholder from webrtc_streamer (audio-only mode)
+st.markdown(
+    '''
+    <style>
+    .stVideo {display: none !important;}
+    [data-testid="stVideo"] {display: none !important;}
+    .rtc-video {display: none !important;}
+    .rtc-video-container {display: none !important;}
+    </style>
+    ''',
+    unsafe_allow_html=True
+)
 
 # Remove phantom container and header at the very top, and make main block transparent
 
@@ -178,9 +195,14 @@ if not st.session_state.authenticated:
             if not users:
                 st.error("User does not exist. Please register.")
             else:
-                # Check password locally (assuming same password for all user entries, or check first)
-                user_record = users[0]
-                if user_record.get("password") != password:
+                authenticated_user_record = None
+                for user_rec in users:
+                    # Check if password is not None and matches
+                    if user_rec.get("password") is not None and user_rec.get("password") == password:
+                        authenticated_user_record = user_rec
+                        break # Found a matching user record, exit loop
+                if authenticated_user_record is None:
+                    # If no user record found with a matching non-null password
                     st.error("Incorrect password.")
                 else:
                     # Password matched - proceed with 2FA flow
@@ -320,6 +342,33 @@ if st.sidebar.button("Log Out"):
     reset_all_states()
     st.rerun()
 
+# Add sidebar navigation for Unity game    
+if 'page' not in st.session_state:           
+    st.session_state.page = 'Chatbot'
+                                                            
+page = st.sidebar.radio('Navigation', ['Chatbot', 'Unity Game'], index=0)
+st.session_state.page = page
+
+if st.session_state.page == 'Unity Game':
+    # Start the Unity game server if not already running
+    server_command = [
+        "python", "-m", "http.server", "8502"
+    ]
+    server_cwd = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Unity_game"))
+    try:
+        subprocess.Popen(server_command, cwd=server_cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        st.warning(f"Could not start Unity game server automatically: {e}")
+    # Open the Unity game in a new browser tab automatically
+    js = """
+    <script>
+    window.open('http://localhost:8502/index.html', '_blank');
+    </script>
+    """
+    st.markdown(js, unsafe_allow_html=True)
+    show_unity_game()
+    st.stop()
+
 if st.session_state.username:
     # Use st.sidebar.markdown to place content in the sidebar
     # You might want some styling to make it look like a proper footer
@@ -388,7 +437,8 @@ if prompt:
                     result = run_inference(prompt)
             # Override strategy if needed
             display_strategy = "CAG" if force_cag else result['strategy']
-            response = f"**Emotion:** {result['emotion']}\n\n**Strategy:** {display_strategy}\n\n**Answer:** {result['answer']}"
+            encouragement = get_encouragement(result['emotion'])
+            response = f"**Emotion:** {result['emotion']}\n\n**Strategy:** {display_strategy}\n\n**Answer:** {result['answer']}\n\n{encouragement}"
             print("LENGTH OF RESPONSE:", len(response))
             st.markdown(response)
     messages.append({"role": "assistant", "content": response})
@@ -414,15 +464,37 @@ if prompt:
 st.session_state.conversations[st.session_state.current_conv] = messages
 
 if messages and messages[-1]["role"] == "assistant":
-    st.markdown("---") # Separator for clarity
-    if st.button("Export Conversation as PDF"):
+    st.markdown("---")  # Separator for clarity
+
+    col1, col2 = st.columns([1, 1])  # Two equal columns side by side
+
+    with col1:
+        if st.button("Export Conversation as PDF"):
             conversation = st.session_state.conversations[st.session_state.current_conv]
             export_conversation_to_pdf(conversation, "conversation_export.pdf")
             with open("conversation_export.pdf", "rb") as f:
                 st.download_button("Download PDF", f, file_name="conversation_export.pdf")
-    st.write("Are you satisfied with this answer?")
+
+    with col2:
+        audio_key = f"tts_audio_summary_{len(messages) - 1}"
+        if st.button("🔊 Listen", key=audio_key):
+            import re
+
+            latest_assistant_content = messages[-1]["content"]
+            # Extract the answer part after "**Answer:**"
+            match = re.search(r'\*\*Answer:\*\*\s*(.*)', latest_assistant_content, re.DOTALL)
+            answer_text = match.group(1).strip() if match else latest_assistant_content
+
+            with st.spinner("Synthesizing speech..."):
+                try:
+                    audio_bytes = synthesize_speech(answer_text)
+                    st.audio(audio_bytes, format="audio/wav")
+                except Exception as e:
+                    st.error(f"Speech synthesis failed: {e}")
+
 
 if messages and messages[-1]["role"] == "assistant":
+    st.write("Are you satisfied with this answer?")
     if st.session_state.is_ai_thinking == False:
 
         if st.button("Yes", key="feedback_yes"):
