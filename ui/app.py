@@ -26,6 +26,7 @@ from speech_utils import transcribe_audio, synthesize_speech
 import subprocess
 import os
 from doc_input_utils import get_doc_content, is_new_file_uploaded
+from ui.answer_references import get_answer_references
 
 
 # Add the project root directory to sys.path
@@ -467,8 +468,14 @@ if prompt:
             display_strategy = "CAG" if force_cag else result['strategy']
             encouragement = get_encouragement(result['emotion'])
             response = f"**Emotion:** {result['emotion']}\n\n**Strategy:** {display_strategy}\n\n**Answer:** {result['answer']}\n\n{encouragement}"
+            search_query = f"{prompt} {result['answer']}"
+            references = get_answer_references(search_query)
             st.markdown(response)
-    messages.append({"role": "assistant", "content": response})
+            if references:
+                st.markdown("*References:*")
+                for title, url in references:
+                    st.markdown(f"- [{title}]({url})")
+        messages.append({"role": "assistant", "content": response, "references": references})
     st.session_state.last_user_prompt = prompt
     st.session_state.is_ai_thinking = False
     st.session_state.conversations[st.session_state.current_conv] = messages

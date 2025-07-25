@@ -42,7 +42,8 @@ dependencies = [
     "pydantic (>=2.11.7,<3.0.0)",
     "python-dotenv (>=1.1.1,<2.0.0)",
     "motor (>=3.7.1,<4.0.0)",
-    "bson (>=0.5.10,<0.6.0)"
+    "bson (>=0.5.10,<0.6.0)",
+    "ddgs (>=9.4.3,<10.0.0)"
 ]
 
 
@@ -55,6 +56,8 @@ name = "pytorch-cu126"
 url = "https://download.pytorch.org/whl/cu126"
 priority = "explicit"
 
-
 [tool.poetry.dependencies]
-torch = {source = "pytorch-cu126"}
+torch = [
+    { version = "==2.7.1", source = "pytorch-cu126", markers = "sys_platform != 'darwin'" },
+    { version = "==2.7.1", markers = "sys_platform == 'darwin'" }
+]
