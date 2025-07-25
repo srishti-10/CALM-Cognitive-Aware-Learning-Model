@@ -65,7 +65,7 @@ This project presents an intelligent, adaptive learning assistant designed to ta
    git checkout main
    ```
 3. **Download models from the provided link**
-   - Download the required models from "link" (replace with actual link).
+   - Download the required models from [MEGA](https://mega.nz/folder/LBNS3b5R#Be5p4H_m2PNd9yNOCO8awQ).
    - Place the downloaded models in the `models` folder.
 4. **Create a conda environment and install Poetry**
    ```sh
@@ -82,14 +82,26 @@ This project presents an intelligent, adaptive learning assistant designed to ta
    - You can change the database link if needed in the configuration file (see backend/database.py or .env).
    - Add the required table using the following query:
      ```sql
-     QUERY
+     CREATE TABLE session_conversations(
+        id integer GENERATED ALWAYS AS IDENTITY NOT NULL,
+        session_id integer,
+        last_updated timestamp with time zone,
+        messages jsonb,
+        username text,
+        password text,
+        user_id varchar(50),
+        totp_secret varchar(50),
+        PRIMARY KEY(id)
+    );
      ```
 7. **Run the backend API**
    ```sh
+   Open a new terminal and activate your new environment
    uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
    ```
 8. **Run the UI**
    ```sh
+   Same thing, a new terminal and activate your new environment
    cd ./ui
    streamlit run app.py
    ```
@@ -97,6 +109,8 @@ This project presents an intelligent, adaptive learning assistant designed to ta
 
 ## Usage
 - Access the UI at `http://localhost:8501` after running Streamlit.
+- Install Google Auth application to Login
+- You can use Pgadmin4 or PostGreSQL extension on IDE to see database
 - Register or log in to start chatting with the emotion-aware chatbot.
 - Export conversations as PDF or play the embedded Unity game.
 
