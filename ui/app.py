@@ -16,6 +16,7 @@ from encouragement import get_encouragement
 from speech_utils import transcribe_audio, synthesize_speech
 import subprocess
 import os
+from doc_input_utils import get_doc_content, is_new_file_uploaded
 
 print("DEBUG: app.py loaded")
 st.set_page_config(page_title="Multi-Conversation Chatbot", layout="wide")
@@ -74,6 +75,8 @@ if "is_ai_thinking" not in st.session_state:
     st.session_state.is_ai_thinking = False
 if 'last_conv_for_last_user_prompt' not in st.session_state:
     st.session_state.last_conv_for_last_user_prompt = None
+if 'doc_prompt_active' not in st.session_state:
+    st.session_state.doc_prompt_active = False
 
 # --- Authentication UI ---
 if 'authenticated' not in st.session_state:
@@ -133,7 +136,6 @@ if not st.session_state.authenticated:
     password = st.text_input('🔑 Password', type='password')
     if auth_mode == 'Register':
         if st.button('📝 Register', type='primary'):
-            print("IN REGISTER MODE")
             success, result = register_user(username, password)
             if success:
                 st.success(f"Registered! Your user ID: {result['user_id']}")
@@ -392,11 +394,27 @@ if st.session_state.current_conv != st.session_state.last_conv_for_last_user_pro
         
     st.session_state.last_conv_for_last_user_prompt = st.session_state.current_conv
 
+
+uploader_key = f"uploader_{st.session_state.current_conv}"
+doc_input_key = f"doc_input_{st.session_state.current_conv}"
+
+uploaded_file = st.file_uploader("Upload a document", type=["txt", "docx"], key=uploader_key)
+
+if is_new_file_uploaded(uploaded_file):
+    st.session_state.doc_prompt_active = True
+elif uploaded_file is None:
+    st.session_state.doc_prompt_active = False
+
+doc_content = get_doc_content(uploaded_file) if uploaded_file is not None else None
+
+if doc_content and st.session_state.doc_prompt_active == True:
+    prompt = st.text_area("What is your question?", value=doc_content, height=200, key=doc_input_key)
+else:
+    prompt = st.chat_input("What is your question?")
+
 for message in messages:
     with st.chat_message(message.get("role", message.get("owner", "user"))):  # fallback role
         st.markdown(message.get("content", message.get("message", "")))
-
-prompt = st.chat_input("What is your question?")
 
 if prompt:
     messages = st.session_state.conversations[st.session_state.current_conv]
@@ -441,7 +459,8 @@ if prompt:
     st.session_state.last_user_prompt = prompt
     st.session_state.is_ai_thinking = False
     st.session_state.conversations[st.session_state.current_conv] = messages
-
+    st.session_state.doc_prompt_active = False
+    doc_content = None 
     update_fields = {
         "messages": messages,
         "last_updated": datetime.now(timezone.utc).isoformat(),
@@ -453,8 +472,6 @@ if prompt:
         st.error("Cannot find conversation id in session mapping!")
     else:
         asyncio.run(update_session_conversation(conversation_id=db_id, update_fields=update_fields))
-
-
 
 # Save back messages to state (actually it's mutable so not strictly necessary)
 st.session_state.conversations[st.session_state.current_conv] = messages
@@ -497,6 +514,7 @@ if messages and messages[-1]["role"] == "assistant":
                 print("DEBUG: User chose YES")
                 st.session_state.is_feedback_postive = True
                 st.session_state.show_secondary_feedback_options = False # Ensure this is hidden
+                st.session_state.doc_prompt_active = False
                 st.rerun()
 
         if st.button("No", key="feedback_no"):
@@ -504,10 +522,11 @@ if messages and messages[-1]["role"] == "assistant":
                 print("DEBUG: User chose NO")
                 st.session_state.show_secondary_feedback_options = True # Show secondary options
                 # Here you would typically send negative feedback to your backend/log
+                st.session_state.doc_prompt_active = False
 
     if st.session_state.is_feedback_postive == True:
         st.write("Thanks for your positive feedback!")
-
+    
     if st.session_state.show_secondary_feedback_options:
         last_answer = messages[-1]["content"] # Get the answer to work on
         if st.button("Shorten", key="secondary_shorten"):
@@ -523,6 +542,7 @@ if messages and messages[-1]["role"] == "assistant":
                 st.session_state.conversations[st.session_state.current_conv] = messages
                 # Hide secondary feedback options after action
                 st.session_state.show_secondary_feedback_options = False
+                st.session_state.doc_prompt_active = False
                 st.session_state.is_ai_thinking = True
                 # Generate AI response
                 with st.spinner("Generating shortened response..."):
@@ -567,6 +587,7 @@ if messages and messages[-1]["role"] == "assistant":
                 messages.append({"role": "assistant", "content": response})
                 st.session_state.conversations[st.session_state.current_conv] = messages    
                 # Hide secondary feedback options after action
+                st.session_state.doc_prompt_active = False
                 st.session_state.is_ai_thinking = False
                 update_fields = {
                     "messages": messages,
@@ -600,6 +621,7 @@ if messages and messages[-1]["role"] == "assistant":
                     messages.append({"role": "assistant", "content": response})
                     st.session_state.conversations[st.session_state.current_conv] = messages    
                     # Hide secondary feedback options after action
+                    st.session_state.doc_prompt_active = False
                     st.session_state.is_ai_thinking = False
                     update_fields = {
                         "messages": messages,
