@@ -1,3 +1,12 @@
+import sys
+import os
+
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+print("PYTHONPATH (after fix):", sys.path)
+
 import streamlit as st
 import time
 from inference_pipeline import run_inference
@@ -17,6 +26,10 @@ from speech_utils import transcribe_audio, synthesize_speech
 import subprocess
 import os
 from doc_input_utils import get_doc_content, is_new_file_uploaded
+
+
+# Add the project root directory to sys.path
+#sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 print("DEBUG: app.py loaded")
 st.set_page_config(page_title="Multi-Conversation Chatbot", layout="wide")
