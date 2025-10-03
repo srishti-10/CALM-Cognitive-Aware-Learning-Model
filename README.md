@@ -1,4 +1,4 @@
-# Clean-up Project
+# RILO_AI
 
 ## Overview
 This project presents an intelligent, adaptive learning assistant designed to tackle the information overload problem in modern digital education. By integrating emotion detection, personalized content strategies, and ReAct-based AI agents, this system dynamically adapts to learners’ emotional and cognitive states to improve comprehension and retention. The solution leverages a modular architecture and state-of-the-art AI to support modern learning environments with emotionally responsive, personalized pedagogy.
